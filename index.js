@@ -8,11 +8,24 @@ app.use(cors({
   // origin: 'https://apps.csj.gob.sv' // limit front end to a given origin, uncomment to test
 }));
 
+
+app.use(express.urlencoded({ extended: true }));
+
+const sendWithAPI = (req, res) => {
+  const {message, to} = req.body;
+  console.log(message, to);
+  res.send({ status: 'Enviado'})
+}
+
+app.post('/send',sendWithAPI)
+
 const fs = require("fs");
 const qrcode = require("qrcode-terminal");
 const { Client, LocalAuth, MessageMedia, Buttons, List } = require("whatsapp-web.js");
 const axios = require("axios");
 
+const ExcelJS = require("exceljs");
+const moment = require("moment");
 
 // Path where the session data will be stored
 const SESSION_FILE_PATH = "./session.json";
@@ -59,6 +72,84 @@ client.on("ready", () => {
     }, 5000);
 });
 
+// Functions
+
+const withSession = () => {
+  
+}
+
+const withOutSession = () => {
+  
+}
+
+const listenMessage = () => {
+  client.on('message', (msg) => {
+    const {from, to, body} = msg;
+
+    switch(body.toLowerCase()){
+      case 'hola':
+        sendMessage(from,'Bienvenido');
+        break;
+      case 'adios':
+        sendMessage(from,'Hasta luego');
+        break;
+    }
+    console.log(from, to, body);
+    saveHistory(from, body);
+  })
+}
+
+const sendMessage = (to, message) =>{ 
+  client.sendMessage(to, message)
+}
+
+// Se requiere la carpeta images
+const sendMedia = (to, message) =>{ 
+  const mediaFile = MessageMedia.fromFilePath(`./images/${file}`)
+  sendMessage(to,"Imagen")
+  client.sendMessage(to, mediaFile)
+}
+
+// Se requiere la carpeta chats
+const saveHistory = (number, message) => {
+   const pathChat = `./chats/${number}.xlsx`;
+   const workbook = new ExcelJS.Workbook();
+   const today = moment().format('DD-MM-YYYY hh:mm');
+
+   if(fs.existsSync(pathChat)){
+   workbook.xlsx.readFile(pathChat)
+   .then (() => {
+      const worksheet = workbook.getWorksheet(1);
+      const lastRow = worksheet.lastRow;     
+      let getRowInsert = worksheet.getRow(++(lastRow.number));
+      getRowInsert.getCell('A').value = today;
+      getRowInsert.getCell('B').value = message;
+      getRowInsert.commit();
+      workbook.xlsx.writeFile(pathChat)
+      .then (() => {
+         console.log('Se agregó chat!!');
+      })
+      .catch(() => {
+         console.log('Algo falló al agregar');
+      })
+   })
+   } else {
+   const worksheet = workbook.addWorksheet('chats');
+   worksheet.columns = [
+    { header: 'Fecha', key: 'date'},
+    { header: 'Mensaje', key: 'message'},
+  ]
+   worksheet.addRow([today, message])
+   workbook.xlsx.writeFile(pathChat)
+   .then(()=>{
+      console.log('Historial creado!!'); 
+   })
+   .catch(()=>{
+      console.log('Algo fallo!');
+   })
+   }
+}
+
 // Database
 const mysql = require('mysql');
 
@@ -85,7 +176,12 @@ const myGroupName = "BOT Group";
 
 client.on('message', async msg => {
     console.log('MESSAGE RECEIVED', msg);
-
+        // Status change
+        if (msg.from === 'status@broadcast') {
+          return
+        }
+    saveHistory(msg.from, msg);
+    
     if (msg.body === '!ping reply') {
         // Send a new message as a reply to the current one
         msg.reply('pong');
@@ -193,6 +289,13 @@ client.on("message", (message) => {
     }
   });
 
+client.on("message", (message) => {
+  // Not Working for WA Business
+  if(message.type === 'buttons_response'){
+    message.reply(`You've selected ${message.body}`);
+  }
+});
+
 client.on('message_create', (msg) => {
     // Fired on all message creations, including your own
     if (msg.fromMe) {
@@ -212,3 +315,9 @@ client.on('message_revoke_me', async (msg) => {
     // Fired whenever a message is only deleted in your own view.
     console.log(msg.body); // message before it was deleted.
 });
+
+(fs.existsSync(SESSION_FILE_PATH) ? withSession() : withOutSession());
+
+app.listen(9000, () => {
+  console.log('API Is Ready');
+})
